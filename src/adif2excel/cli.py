@@ -10,8 +10,8 @@ and writes an .xlsx that a label printer can merge against.
     python main.py log.adi --delimiter ', '   # one-line addresses
     python main.py log.adi -v                 # per-callsign progress
 
-QRZ credentials come from QRZ_CALL and QRZ_PASSWORD, in the environment or in a
-.env file in the working directory. The XML API needs a QRZ subscription.
+You are prompted for your QRZ callsign and password at the terminal (the
+password is not echoed). The XML API needs a QRZ subscription.
 
 Sections below, in order: configuration, QRZ lookups, address building,
 spreadsheet building, command line.
@@ -20,8 +20,8 @@ spreadsheet building, command line.
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
-import os
 import re
 import sys
 from collections.abc import Callable
@@ -35,7 +35,6 @@ import adiftools.adiftools as adiftools
 import pandas as pd
 import pycountry
 import qrzlib
-from dotenv import load_dotenv
 from i18naddress import InvalidAddressError, format_address
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
@@ -48,10 +47,6 @@ log = logging.getLogger("adif2excel")
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-
-#: Environment variables (or .env keys) holding QRZ credentials.
-ENV_CALLSIGN = "QRZ_CALL"
-ENV_PASSWORD = "QRZ_PASSWORD"
 
 SHEET_NAME = "QSL Labels"
 
@@ -197,7 +192,7 @@ CallsignLookup = Callable[[str], "qrzlib.QRZRecord | None"]
 
 
 class MissingCredentials(RuntimeError):
-    """Raised when the QRZ username or password is not configured."""
+    """Raised when the QRZ username or password could not be obtained."""
 
 
 class QrzClient:
@@ -213,31 +208,43 @@ class QrzClient:
         self._session: qrzlib.QRZ | None = None
 
     @classmethod
-    def from_env(cls, dotenv_path: str | None = None) -> QrzClient:
-        """Build a client from QRZ_CALL / QRZ_PASSWORD.
+    def from_prompt(cls, *, attempts: int = 3) -> QrzClient:
+        """Build a client by asking the user for their callsign and password.
 
-        Looks for a .env in the working directory first, then one sitting beside
-        this script. That second lookup is what lets a wrapper on PATH invoke the
-        tool from anywhere without exporting credentials globally. Real
-        environment variables override both.
+        The callsign is echoed as typed; the password is read with getpass, so
+        nothing appears on screen and nothing lands in the terminal scrollback.
+        Nothing is read from or written to the environment or any file.
 
         Raises:
-            MissingCredentials: if either value is absent or blank.
+            MissingCredentials: if there is no interactive terminal to prompt on,
+                the user gives up (Ctrl-C / Ctrl-D), or a value stays blank after
+                ``attempts`` tries.
         """
-        load_dotenv(dotenv_path)
-        beside_script = Path(__file__).resolve().with_name(".env")
-        if beside_script.is_file():
-            load_dotenv(beside_script)  # does not overwrite anything already set
-
-        username = (os.getenv(ENV_CALLSIGN) or "").strip()
-        password = os.getenv(ENV_PASSWORD) or ""
-        if not username or not password:
+        if not sys.stdin.isatty():
             raise MissingCredentials(
-                f"Set {ENV_CALLSIGN} and {ENV_PASSWORD} in the environment, in a .env "
-                f"file in this directory, or in {beside_script}. Run with --no-lookup "
-                "to skip QRZ entirely and produce a sheet with blank addresses."
+                "No terminal to prompt for QRZ credentials. Run interactively, or "
+                "use --no-lookup to skip QRZ entirely."
             )
+
+        try:
+            username = cls._ask("QRZ callsign: ", attempts, secret=False).upper()
+            password = cls._ask(f"QRZ password for {username}: ", attempts, secret=True)
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)  # finish the half-typed prompt line
+            raise MissingCredentials("QRZ login cancelled.") from None
         return cls(username, password)
+
+    @staticmethod
+    def _ask(prompt: str, attempts: int, *, secret: bool) -> str:
+        """Prompt until the answer is non-blank, up to ``attempts`` times."""
+        read = getpass.getpass if secret else input
+        for _ in range(attempts):
+            answer = read(prompt)
+            answer = answer if secret else answer.strip()
+            if answer:
+                return answer
+            print("A value is required.", file=sys.stderr)
+        raise MissingCredentials("QRZ login cancelled: no value entered.")
 
     def _connect(self) -> qrzlib.QRZ:
         if self._session is None:
@@ -682,8 +689,8 @@ def build_parser() -> argparse.ArgumentParser:
             "and write a spreadsheet ready for a QSL label printer."
         ),
         epilog=(
-            f"QRZ credentials are read from {ENV_CALLSIGN} and {ENV_PASSWORD}, either "
-            "in the environment or in a .env file in the working directory."
+            "You will be prompted for your QRZ callsign and password; the password "
+            "is not echoed."
         ),
     )
     parser.add_argument("input", type=Path, help="ADIF file to read (.adi)")
@@ -754,7 +761,7 @@ def main(argv: list[str] | None = None) -> int:
         lookup: CallsignLookup = lambda callsign: None  # noqa: E731
     else:
         try:
-            lookup = QrzClient.from_env()
+            lookup = QrzClient.from_prompt()
         except MissingCredentials as err:
             log.error("%s", err)
             return EXIT_ERROR
