@@ -1,5 +1,6 @@
 # Dev Env Caches
 .ruff_cache/
+.mypy_cache/
 
 # Environment Files
 .env
