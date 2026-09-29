@@ -24,11 +24,12 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import Callable
+from typing import cast
 
 import adiftools.adiftools as adiftools
 import pandas as pd
@@ -39,9 +40,9 @@ from i18naddress import InvalidAddressError, format_address
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
-__version__ = "0.2.0"
+import adif2excel
 
-log = logging.getLogger("adif_to_excel")
+log = logging.getLogger("adif2excel")
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +213,7 @@ class QrzClient:
         self._session: qrzlib.QRZ | None = None
 
     @classmethod
-    def from_env(cls, dotenv_path: str | None = None) -> "QrzClient":
+    def from_env(cls, dotenv_path: str | None = None) -> QrzClient:
         """Build a client from QRZ_CALL / QRZ_PASSWORD.
 
         Looks for a .env in the working directory first, then one sitting beside
@@ -257,7 +258,7 @@ class QrzClient:
         if not callsign:
             return None
         try:
-            return self._connect().get_call(callsign)
+            return cast(qrzlib.QRZRecord | None, self._connect().get_call(callsign))
         except qrzlib.QRZ.NotFound:
             log.info("%s is not listed on QRZ", callsign)
         except (qrzlib.QRZ.SessionError, qrzlib.QRZ.XMLError, ValueError) as err:
@@ -319,7 +320,7 @@ def normalize_country(country_name: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-@lru_cache(maxsize=None)
+@cache
 def country_to_iso2(country_name: str | None) -> str | None:
     """Map a QRZ country string to an ISO 3166-1 alpha-2 code.
 
@@ -349,10 +350,14 @@ def country_to_iso2(country_name: str | None) -> str | None:
     try:
         match = pycountry.countries.search_fuzzy(name)[0]
     except LookupError:
-        log.warning("No ISO country code for %r (add it to COUNTRY_OVERRIDES)", country_name)
+        log.warning(
+            "No ISO country code for %r (add it to COUNTRY_OVERRIDES)", country_name
+        )
         return None
 
-    log.debug("Fuzzy-matched country %r to %s (%s)", country_name, match.alpha_2, match.name)
+    log.debug(
+        "Fuzzy-matched country %r to %s (%s)", country_name, match.alpha_2, match.name
+    )
     return match.alpha_2
 
 
@@ -418,7 +423,9 @@ def _recipient_name(record: qrzlib.QRZRecord, callsign: str) -> str:
     return f"{name} ({callsign})" if name else callsign
 
 
-def _format_lines(record: qrzlib.QRZRecord, iso2: str, name: str, attention: str) -> list[str]:
+def _format_lines(
+    record: qrzlib.QRZRecord, iso2: str, name: str, attention: str
+) -> list[str]:
     """Lay the address out per the destination country's conventions."""
     fields = {
         "name": _tidy(name),
@@ -432,9 +439,12 @@ def _format_lines(record: qrzlib.QRZRecord, iso2: str, name: str, attention: str
     fields = {k: v for k, v in fields.items() if v}
 
     try:
-        lines = format_address(fields, latin=True).split("\n")
+        # Wrap the untyped string split output in a type cast
+        lines = cast(list[str], format_address(fields, latin=True).split("\n"))
     except InvalidAddressError as err:
-        log.debug("i18n formatting rejected %s (%s); using plain layout", record.call, err)
+        log.debug(
+            "i18n formatting rejected %s (%s); using plain layout", record.call, err
+        )
         lines = [
             line
             for line in (
@@ -495,7 +505,9 @@ def resolve_mailing_address(
     if manager_call:
         manager_record = lookup(manager_call)
         if manager_record is None:
-            log.warning("%s lists manager %s, who is not on QRZ", callsign, manager_call)
+            log.warning(
+                "%s lists manager %s, who is not on QRZ", callsign, manager_call
+            )
             return MailingAddress("", AddressStatus.MANAGER_NOT_FOUND)
         source, status = manager_record, AddressStatus.VIA_MANAGER
         name = _recipient_name(manager_record, manager_call)
@@ -512,7 +524,9 @@ def resolve_mailing_address(
     if not iso2:
         return MailingAddress("", AddressStatus.UNKNOWN_COUNTRY)
 
-    return MailingAddress(delimiter.join(_format_lines(source, iso2, name, attention)), status)
+    return MailingAddress(
+        delimiter.join(_format_lines(source, iso2, name, attention)), status
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +600,7 @@ def build_label_rows(
     # Keyed on (call, route) rather than call alone, because QSL_VIA belongs to
     # the QSO, not the station. The same call worked on two DXpeditions can have
     # two different managers.
-    keys = list(zip(calls, routes))
+    keys = list(zip(calls, routes, strict=True))
     addresses: dict[tuple[str, str], MailingAddress] = {}
     unique_keys = list(dict.fromkeys(key for key in keys if key[0]))
     for index, key in enumerate(unique_keys, start=1):
@@ -599,16 +613,22 @@ def build_label_rows(
     return pd.DataFrame(
         {
             "CALL": calls,
-            "QSO_DATE_OFF": _column(log_frame, "QSO_DATE_OFF", "QSO_DATE").map(_format_date),
+            "QSO_DATE_OFF": _column(log_frame, "QSO_DATE_OFF", "QSO_DATE").map(
+                _format_date
+            ),
             "TIME_OFF": _column(log_frame, "TIME_OFF", "TIME_ON").map(_format_time),
             "FREQ": _column(log_frame, "FREQ"),
-            "RST": _combine_rst(_column(log_frame, "RST_SENT"), _column(log_frame, "RST_RCVD")),
+            "RST": _combine_rst(
+                _column(log_frame, "RST_SENT"), _column(log_frame, "RST_RCVD")
+            ),
             "MODE": _column(log_frame, "MODE"),
             "Note": "",
             "QSL_PSE": CHECKED,
             "QSL_TNX": CHECKED,
             "address": [addresses[k].text if k in addresses else "" for k in keys],
-            "status": [str(addresses[k].status) if k in addresses else "" for k in keys],
+            "status": [
+                str(addresses[k].status) if k in addresses else "" for k in keys
+            ],
         },
         columns=COLUMNS,
     )
@@ -627,7 +647,9 @@ def write_workbook(rows: pd.DataFrame, destination: Path) -> None:
 
         for position, name in enumerate(rows.columns, start=1):
             letter = get_column_letter(position)
-            worksheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(name, DEFAULT_WIDTH)
+            worksheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(
+                name, DEFAULT_WIDTH
+            )
             if name == "address":
                 for cell in worksheet[letter][1:]:  # skip the header row
                     cell.alignment = Alignment(wrap_text=True, vertical="top")
@@ -692,7 +714,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show per-callsign progress and debug detail",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {adif2excel.__version__}"
+    )
     return parser
 
 

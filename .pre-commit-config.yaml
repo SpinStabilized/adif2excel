@@ -1,0 +1,41 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      # Lint first, and fix what can be fixed. Runs before black so that any
+      # import reordering from the "I" rules is formatted afterward, not left
+      # for the next commit to notice.
+      - id: ruff-check
+        args: [--fix]
+
+  - repo: https://github.com/psf/black
+    rev: 26.5.1
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-toml          # catches a broken pyproject.toml before it lands
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # mypy needs the project's own dependencies to resolve imports, which the
+  # standard mirrors-mypy hook cannot provide. Running it through uv reuses the
+  # project environment, so the hook and `make typecheck` check the same thing
+  # with the same versions.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        # mypy needs the whole package to resolve cross-module types, not just
+        # the files that happen to be staged. `files` in pyproject.toml decides
+        # what gets checked.
+        pass_filenames: false

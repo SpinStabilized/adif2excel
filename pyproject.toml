@@ -1,9 +1,9 @@
 [project]
-name = "adif-to-excel"
-version = "0.2.0"
+name = "adif2excel"
+version = "0.1.0"
 description = "Turn an ADIF log into a QSL-label spreadsheet, with addresses from QRZ.com."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "adiftools>=0.1.12",
     "google-i18n-address>=3.1.1",
@@ -13,3 +13,50 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "qrzlib>=2.1.0",
 ]
+
+[project.scripts]
+adif2excel = "adif2excel.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "mypy>=2.3.1",
+    "pandas-stubs>=3.0.5.260914",
+    "pre-commit>=4.6.2",
+    "ruff>=0.9.0",
+    "types-openpyxl>=3.1.5.20260827",
+    "types-requests>=2.33.0.20260906",
+    "vermin>=1.6.0",
+]
+
+[tool.black]
+target-version = ["py311"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "adiftools",
+    "adiftools.*",
+    "i18naddress.*",
+    "i18naddress"
+]
+ignore_missing_imports = true

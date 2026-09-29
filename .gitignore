@@ -1,3 +1,6 @@
+# Dev Env Caches
+.ruff_cache/
+
 # Environment Files
 .env
 
