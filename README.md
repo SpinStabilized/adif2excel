@@ -5,7 +5,7 @@ and writes a spreadsheet that a QSL label printer can merge against. This is
 for my own use of a Niimbot thermal printer for QSO labels and address labels
 but others might find it useful as well.
 
-Everything lives in `main.py`, in five labelled sections: configuration, QRZ
+Everything lives in `src/adif2excel/cli.py`, in five labelled sections: configuration, QRZ
 lookups, address building, spreadsheet building, and the command line.
 
 ## Setup
@@ -14,24 +14,18 @@ lookups, address building, spreadsheet building, and the command line.
 uv sync
 ```
 
-QRZ's XML API needs a subscription. Put your login in a `.env` file next to the
-script (already covered by `.gitignore`):
-
-```
-QRZ_CALL=N0CALL
-QRZ_PASSWORD=your-qrz-password
-```
-
-Real environment variables override the `.env` file if both are set.
+QRZ's XML API needs a subscription. The script prompts for your QRZ callsign and
+password each time it runs (the password is not echoed), so no credentials are
+stored in the environment or on disk. Use `--no-lookup` to skip the prompt.
 
 ## Use
 
 ```bash
-uv run main.py log.adi                    # writes log.xlsx beside the input
-uv run main.py log.adi -o cards.xlsx      # explicit output path
-uv run main.py log.adi --no-lookup        # layout only, no QRZ queries spent
-uv run main.py log.adi --delimiter ', '   # one-line addresses
-uv run main.py log.adi -v                 # per-callsign progress
+uv run adif2excel log.adi                    # writes log.xlsx beside the input
+uv run adif2excel log.adi -o cards.xlsx      # explicit output path
+uv run adif2excel log.adi --no-lookup        # layout only, no QRZ queries spent
+uv run adif2excel log.adi --delimiter ', '   # one-line addresses
+uv run adif2excel log.adi -v                 # per-callsign progress
 ```
 
 With no `-o`, output goes to the same directory with the same stem and an
@@ -53,7 +47,7 @@ With no `-o`, output goes to the same directory with the same stem and an
 | `status`              | why the address looks the way it does           |
 
 Header names are what a label template merges against, so renaming one means
-editing the template to match. They live in `COLUMNS` near the top of `main.py`.
+editing the template to match. They live in `COLUMNS` near the top of `cli.py`.
 
 ## The `status` column
 
@@ -69,7 +63,7 @@ Sort or filter on this to find the cards needing hand work:
 | `QSL manager not on QRZ`   | a manager was named but could not be resolved                                      |
 
 If you hit `country not recognized`, add the country string to
-`COUNTRY_OVERRIDES` in `main.py`.
+`COUNTRY_OVERRIDES` in `cli.py`.
 
 ## Caching
 
