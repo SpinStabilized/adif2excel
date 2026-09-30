@@ -5,6 +5,9 @@
 # Environment Files
 .env
 
+# Dev Env Files
+.vscode/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
