@@ -1,4 +1,4 @@
-# adif-to-excel
+# adif2excel
 
 Reads an ADIF log, looks up each worked station's mailing address on QRZ.com,
 and writes a spreadsheet that a QSL label printer can merge against. This is
